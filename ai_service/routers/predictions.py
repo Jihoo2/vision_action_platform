@@ -7,6 +7,9 @@
   422                         : 손상된 영상 (열 수 없음·Frame 없음)
   503                         : 모델이 아직 준비되지 않음
 FastAPI는 DB에 저장하지 않습니다. 저장은 Celery Worker가 Django ORM으로 합니다.
+
+[흐름] backend services.predict_video() 가 HTTP 로 호출 → predict() → _analyze()
+       → services/pose_pipeline.extract_tracks() → services/action_inference.predict_video()
 """
 from __future__ import annotations
 

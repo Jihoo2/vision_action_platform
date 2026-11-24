@@ -4,6 +4,9 @@
 - 연결 실패·도중 끊김·프레임 부족은 CameraError 로 알림 → 작업 FAILED + 사유 저장 (T09)
 - 저장한 MP4는 업로드 영상과 똑같이 FastAPI /api/v1/predict/ 로 보냄 (추론 경로 재사용)
 
+[흐름] tasks._acquire_video() → capture_clip() → (_retime) → to_h264() → 경로 반환
+       → tasks.run_analysis() 가 services 로 AI 서버 호출
+
 참고: 추론은 '사람별 전체 Frame → 30 Step Resample' 방식이라 FPS 절댓값보다
       수집 구간 안에서 Frame 순서·간격이 유지되는 것이 중요합니다.
 """
@@ -45,8 +48,10 @@ def capture_clip(camera_url: str, seconds: int, job_id: int) -> tuple[str, dict]
     out_path = Path(settings.MEDIA_ROOT) / rel
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    fps = fps if 1 <= fps <= 60 else 15.0       # MJPEG 스트림은 FPS를 0으로 주는 경우가 많음
+    # stream_fps : 카메라가 알려 준 값 그대로 (MJPEG 스트림은 0 을 주는 경우가 많음)
+    # write_fps  : 파일을 처음 쓸 때 쓰는 값 — 알려 주지 않으면 임시로 15
+    stream_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    write_fps = stream_fps if 1 <= stream_fps <= 60 else 15.0
     writer = None
     frames, fails = 0, 0
     started = time.monotonic()
@@ -65,7 +70,7 @@ def capture_clip(camera_url: str, seconds: int, job_id: int) -> tuple[str, dict]
                 frame = cv2.resize(frame, (MAX_WIDTH, int(h * MAX_WIDTH / w)))
             if writer is None:
                 h, w = frame.shape[:2]
-                writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+                writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), write_fps, (w, h))
                 if not writer.isOpened():
                     raise CameraError("수집 영상을 저장할 수 없습니다.")
             writer.write(frame)
@@ -80,15 +85,16 @@ def capture_clip(camera_url: str, seconds: int, job_id: int) -> tuple[str, dict]
         out_path.unlink(missing_ok=True)
         raise CameraError(f"수집된 Frame이 너무 적습니다 ({frames}개 / {elapsed:.1f}초).")
 
-    # 스트림이 알려 준 FPS(또는 기본 15)와 실제 수신 속도가 다르면 영상 길이가 틀어짐
+    # 처음 쓴 FPS(write_fps)와 실제 수신 속도(measured_fps)가 다르면 영상 길이가 틀어짐
     # (예: 8초 수집인데 19초짜리 파일) → 실제 측정 FPS로 다시 기록
-    measured = frames / elapsed if elapsed else fps
-    measured = min(max(measured, 1.0), 120.0)   # 비정상 값 방지
-    if abs(measured - fps) > 1.0:
-        _retime(out_path, measured, max_frames=frames)
+    measured_fps = frames / elapsed if elapsed else write_fps
+    measured_fps = min(max(measured_fps, 1.0), 120.0)   # 비정상 값 방지
+    if abs(measured_fps - write_fps) > 1.0:
+        _retime(out_path, measured_fps, max_frames=frames)
     codec = "h264" if to_h264(out_path) else "mp4v"
     return str(rel), {"frames": frames, "seconds": round(elapsed, 2),
-                      "measured_fps": round(measured, 2), "stream_fps": fps,
+                      "measured_fps": round(measured_fps, 2), "stream_fps": stream_fps,
+                      "write_fps": write_fps,
                       "codec": codec}
 
 

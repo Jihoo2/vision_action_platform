@@ -4,6 +4,9 @@
   - Tracking : model.track(..., tracker=bytetrack.yaml)       (8일차 47·49번)
   - Feature  : src.multi_person_utils.feature_from_keypoints  (3일차 정규화 + 각도, 38-D)
 한 사람이 여러 명이어도 Track ID마다 따로 모읍니다.
+
+[흐름] routers/predictions._analyze() → extract_tracks() → (Frame마다) feature_from_keypoints()
+       → 반환한 VideoResult 를 action_inference.predict_video() 가 받음
 """
 from __future__ import annotations
 

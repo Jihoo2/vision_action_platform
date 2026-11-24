@@ -8,12 +8,16 @@
   GET    /api/v1/analyses/{id}/status/  상태만 가볍게 조회 (브라우저 주기 조회용)
 
 다른 사용자의 작업은 get_queryset 단계에서 제외 → 존재 여부도 드러나지 않게 404 (T07)
+
+[흐름] analyses.js(버튼) → create() → on_commit → enqueue_analysis() → Redis
+       → tasks.run_analysis() (다음 파일: analyses/tasks.py)
 """
 import logging
 
 from django.db import transaction
 from django.utils import timezone
-from rest_framework import status, viewsets
+from rest_framework import status as http_status   # HTTP 상태 코드 (201 등) — 아래 job_status API 와 이름 구분
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -48,7 +52,7 @@ class AnalysisJobViewSet(viewsets.ModelViewSet):
         # DB 커밋이 끝난 뒤에 Celery 작업 등록 → Worker가 아직 없는 Job을 찾는 일이 없음
         transaction.on_commit(lambda: enqueue_analysis(job.pk))
         return Response(AnalysisJobSerializer(job, context={"request": request}).data,
-                        status=status.HTTP_201_CREATED)
+                        status=http_status.HTTP_201_CREATED)
 
     def partial_update(self, request, *args, **kwargs):
         job = self.get_object()
@@ -62,16 +66,19 @@ class AnalysisJobViewSet(viewsets.ModelViewSet):
             instance.video.delete(save=False)                # media/ 의 실제 파일도 정리
         instance.delete()                                    # PersonPrediction·RepJudgment 는 CASCADE
 
-    @action(detail=True, methods=["get"])
-    def status(self, request, pk=None):
+    # URL 은 그대로 /analyses/{id}/status/ — 함수 이름만 job_status 로 (HTTP status 모듈과 구분)
+    @action(detail=True, methods=["get"], url_path="status", url_name="status")
+    def job_status(self, request, pk=None):
         job = self.get_object()
+        is_form = job.task_type == AnalysisJob.TaskType.FORM
         return Response({
             "id": job.id,
             "status": job.status,
             "status_display": job.get_status_display(),
             "done": job.status in (AnalysisJob.Status.COMPLETED, AnalysisJob.Status.FAILED),
-            "prediction_count": job.predictions.count(),
-            "rep_count": job.reps.count(),
+            # 1초마다 불리는 API → 작업 종류에 맞는 개수만 셈 (COUNT 쿼리 2번 → 1번)
+            "prediction_count": 0 if is_form else job.predictions.count(),
+            "rep_count": job.reps.count() if is_form else 0,
             "result_message": job.result_message,
             "error_message": job.error_message,
         })

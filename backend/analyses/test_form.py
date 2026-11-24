@@ -77,6 +77,14 @@ class FormApiTests(APITestCase):
         res = self.post({"task_type": "FORM", "exercise": "A006", "input_type": "UPLOAD", "video": fake_video()})
         self.assertEqual(res.status_code, 400)
 
+    def test_status_api_counts_only_its_type(self):
+        """상태 API: 자세 판정 작업은 회차 수만, 예측 수는 0 (COUNT 쿼리 1번)"""
+        res = self.post({"task_type": "FORM", "exercise": "A004", "input_type": "UPLOAD", "video": fake_video()})
+        job = AnalysisJob.objects.get(pk=res.data["id"])
+        RepJudgment.objects.create(job=job, seq=1, rep_label="1", verdict="OK")
+        st = self.client.get(f"/api/v1/analyses/{job.id}/status/").data
+        self.assertEqual((st["rep_count"], st["prediction_count"]), (1, 0))
+
     def test_ipcam_form_allows_longer_capture(self):
         ok = self.post({"task_type": "FORM", "exercise": "A008", "input_type": "IPCAM", "capture_seconds": 25}, "json")
         self.assertEqual(ok.status_code, 201, ok.data)
@@ -103,6 +111,7 @@ class FormTaskTests(TestCase):
         self.assertEqual(self.job.model_name, "team05_form_rules")
         self.assertEqual(self.job.video_duration_sec, 10.0)
         self.assertEqual(self.job.extra["summary"]["ng"], 2)
+        self.assertEqual(self.job.extra["schema"], "form.v1")
         reps = list(self.job.reps.all())
         self.assertEqual([r.verdict for r in reps], ["OK", "NG", "NG"])
         self.assertEqual(reps[2].rep_label, "얕은1")

@@ -3,6 +3,9 @@
 FastAPI 응답 규칙(ai_service/routers/predictions.py)에 맞춰 오류를 두 종류로 나눕니다.
   AIInputError    : 영상 자체 문제 (400 너무 짧음/형식, 422 손상)  → 사용자에게 사유 표시
   AIServiceError  : 서버 문제 (연결 실패, 타임아웃, 5xx, 503 모델 미준비)
+
+[흐름] tasks.run_analysis() → predict_video() / judge_form() → _post() (httpx)
+       → ai_service routers/predictions.py  또는  form_service main.py
 """
 from pathlib import Path
 

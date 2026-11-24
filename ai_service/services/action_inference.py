@@ -1,4 +1,7 @@
-"""Track ID별 시계열 → 30-Step Sequence(1,140) → Random Forest → 사람별 결과
+"""[흐름] routers/predictions._analyze() → pose_pipeline.extract_tracks() → 여기 predict_video()
+       → Track마다 predict_track() → src/realtime_utils.predict_from_window() (30 Step → RF)
+
+Track ID별 시계열 → 30-Step Sequence(1,140) → Random Forest → 사람별 결과
 
 추론 방식: 6일차 학습과 같은 'Clip 전체' 방식
   한 사람의 전체 유효 Frame을 30 Step으로 Resample → Flatten → predict_proba 1회
@@ -21,15 +24,18 @@ from .model_loader import ModelBundle
 from .pose_pipeline import TrackSeries, VideoResult
 
 UNCERTAIN_MARGIN = float(os.getenv("UNCERTAIN_MARGIN", "0.05"))
-MIN_TRACK_FRAMES = int(os.getenv("MIN_TRACK_FRAMES", "10"))   # 이보다 짧게 잡힌 Track은 오검출로 보고 제외
+# 두 기준은 비슷해 보이지만 역할이 다름
+#   MIN_SEEN_FRAMES  : Track 이 잡힌 Frame 수 — 잠깐 스친 오검출 거르기 (predict_video 단계)
+#   min_valid_frames : 관절 특징을 만든 Frame 수 — 예측이 가능한지 (predict_track 단계, 학습 정보에서 읽음)
+MIN_SEEN_FRAMES = int(os.getenv("MIN_TRACK_FRAMES", "10"))   # 환경 변수 이름은 그대로 (호환)
 # 관절 신뢰도 평균이 이보다 낮으면 사람이 아니거나(배경·모니터 속 사람 등) 관절이 거의 안 보이는 Track
 MIN_KEYPOINT_CONF = float(os.getenv("MIN_KEYPOINT_CONF", "0.35"))
 
 
 def predict_track(series: TrackSeries, bundle: ModelBundle) -> dict | None:
     valid = [(t, f) for t, f in zip(series.times, series.features) if f is not None]
-    min_valid = int(bundle.training_info.get("min_valid_frames", 10))
-    if len(valid) < min_valid:
+    min_valid_frames = int(bundle.training_info.get("min_valid_frames", 10))
+    if len(valid) < min_valid_frames:
         return None
 
     span = valid[-1][0] - valid[0][0] + 1.0
@@ -37,6 +43,7 @@ def predict_track(series: TrackSeries, bundle: ModelBundle) -> dict | None:
     for t, f in valid:
         buf.append(t, f)
 
+    # 7일차 함수 재사용 — 첫 반환값(0.55 기준 라벨)은 쓰지 않고, 불확실 판단은 아래 margin 하나로 함
     _, raw_label, conf, probs = predict_from_window(
         bundle.rf, buf, bundle.sequence_steps,
         bundle.realtime.get("confidence_threshold", 0.55),
@@ -65,9 +72,9 @@ def predict_track(series: TrackSeries, bundle: ModelBundle) -> dict | None:
 def predict_video(result: VideoResult, bundle: ModelBundle) -> dict:
     predictions, skipped = [], []
     for tid, s in sorted(result.tracks.items()):
-        if s.frames_seen < MIN_TRACK_FRAMES:
+        if s.frames_seen < MIN_SEEN_FRAMES:
             skipped.append({"track_id": tid, "frames_seen": s.frames_seen,
-                            "reason": f"{MIN_TRACK_FRAMES} Frame 미만으로 잠깐 잡힌 Track (오검출 가능)"})
+                            "reason": f"{MIN_SEEN_FRAMES} Frame 미만으로 잠깐 잡힌 Track (오검출 가능)"})
             continue
         kconf = float(np.mean(s.keypoint_conf)) if s.keypoint_conf else 0.0
         if kconf < MIN_KEYPOINT_CONF:
