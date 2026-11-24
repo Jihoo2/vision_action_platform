@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+ultralytics==8.4.203
+torch==2.15.0
+scikit-learn==1.9.1
+joblib==1.6.0
+numpy==2.5.4
+pandas
+lap==0.5.14
+opencv-python-headless

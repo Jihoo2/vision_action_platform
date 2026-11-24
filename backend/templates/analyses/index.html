@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}AI 동작 분석{% endblock %}
+{% block content %}
+<div class="grid2">
+  <!-- ① 입력 방식 선택 + 분석 시작 -->
+  <section class="card">
+    <h1>AI 동작 분석</h1>
+    <div class="tabs">
+      <button type="button" class="tab active" data-tab="UPLOAD">영상 업로드</button>
+      <button type="button" class="tab" data-tab="IPCAM">IP Webcam</button>
+    </div>
+
+    <form id="analyze-form" class="form" enctype="multipart/form-data">
+      {% csrf_token %}
+      <input type="hidden" name="input_type" id="input_type" value="UPLOAD">
+
+      <div class="pane active" data-pane="UPLOAD">
+        <p><label for="video">분석할 영상 ({{ allowed_ext }}, 최대 {{ max_upload_mb }}MB)</label>
+          <input type="file" id="video" name="video" accept="video/*"></p>
+        <p class="hint">한 사람이 6개 동작 중 하나를 수행한 짧은 영상이 가장 잘 분석됩니다.</p>
+      </div>
+
+      <div class="pane" data-pane="IPCAM">
+        {% if cameras %}
+        <div class="row">
+          <p><label for="camera_url">카메라</label>
+            <select id="camera_url" name="camera_url">
+              {% for url, label in cameras %}<option value="{{ url }}">{{ label }}</option>{% endfor %}
+            </select></p>
+          <p><label for="capture_seconds">수집 시간(초, 3~15)</label>
+            <input type="number" id="capture_seconds" name="capture_seconds" min="3" max="15" value="{{ capture_seconds }}"></p>
+        </div>
+        <p class="hint">분석 시작을 누르면 서버가 카메라에서 정해진 시간 동안 영상을 받습니다. 그 시간 동안 카메라 앞에서 동작을 수행하세요.</p>
+        {% else %}
+        <p class="msg error">허용된 카메라가 없습니다. 관리자에게 .env 의 ALLOWED_CAMERA_URLS 설정을 요청하세요.</p>
+        {% endif %}
+      </div>
+
+      <div class="row">
+        <p><label for="expected_action">수행하려는 동작 (선택 · 정답 아님)</label>
+          <select id="expected_action" name="expected_action">
+            <option value="">선택 안 함</option>
+            {% for value, label in actions %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+          </select></p>
+        <p><label for="title">제목 (선택)</label>
+          <input type="text" id="title" name="title" maxlength="100" placeholder="예: 손 흔들기 1회차"></p>
+      </div>
+      <button type="submit" id="start-btn" class="btn-lg">AI 분석 시작</button>
+    </form>
+  </section>
+
+  <!-- ② 작업 상태 + 사람별 결과 -->
+  <section class="card" id="result-card">
+    <h1>분석 결과 <span id="job-label" class="muted"></span></h1>
+    <div class="steps" id="steps">
+      <div class="step" data-step="PENDING">대기</div>
+      <div class="step" data-step="PROCESSING" id="step-processing">처리 중</div>
+      <div class="step" data-step="COMPLETED">완료</div>
+      <div class="step" data-step="FAILED">실패</div>
+    </div>
+    <div id="status-msg" class="muted">분석을 시작하면 여기에 진행 상태와 결과가 표시됩니다.</div>
+    <div id="result-body"></div>
+  </section>
+</div>
+
+<!-- ③ 최근 분석 이력 (입력 방식·수행 동작·예측·Confidence·처리 시간 비교) -->
+<section class="card">
+  <h2 style="margin-top:0">최근 분석 이력</h2>
+  <table class="data">
+    <thead><tr><th>#</th><th>입력 방식</th><th>상태</th><th>수행하려던 동작</th><th>예측 (사람 수)</th>
+      <th>Confidence</th><th>영상 길이</th><th>처리 시간</th><th>요청 시각</th></tr></thead>
+    <tbody id="history"><tr><td colspan="9" class="empty">불러오는 중…</td></tr></tbody>
+  </table>
+  <p class="hint">촬영 거리·길이·사람이 다르면 Confidence 크기만으로 입력 방식의 성능을 비교할 수 없습니다.</p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{{ actions|json_script:"action-labels" }}
+<script src="{% static 'js/analyses.js' %}"></script>
+{% endblock %}

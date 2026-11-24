@@ -1,0 +1,17 @@
+from django.conf import settings
+from django.conf.urls.static import static
+from django.contrib import admin
+from django.urls import include, path
+from django.views.generic import RedirectView
+
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("accounts/", include("accounts.urls")),                  # signup/, me/
+    path("accounts/", include("django.contrib.auth.urls")),       # login/, logout/ ...
+    path("", include("analyses.urls")),                           # api/v1/analyses/, analyses/, dashboard/
+    path("api-auth/", include("rest_framework.urls")),            # Browsable API 로그인
+    path("", RedirectView.as_view(pattern_name="analyses_index", permanent=False), name="home"),
+]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

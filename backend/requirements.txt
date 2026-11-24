@@ -1,0 +1,10 @@
+Django
+djangorestframework
+psycopg[binary]
+celery
+redis
+httpx
+python-dotenv
+opencv-python-headless
+gunicorn
+packaging

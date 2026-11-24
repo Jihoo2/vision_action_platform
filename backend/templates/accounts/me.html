@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}내 정보{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>내 정보</h1>
+  <table class="kv">
+    <tr><th>아이디</th><td>{{ user.username }}</td></tr>
+    <tr><th>권한</th><td>{% if user.is_staff %}관리자 (전체 기록·대시보드 접근){% else %}일반 회원 (본인 분석만 접근){% endif %}</td></tr>
+    <tr><th>가입일</th><td>{{ user.date_joined|date:"Y-m-d H:i" }}</td></tr>
+    <tr><th>내 분석 작업 수</th><td>{{ job_count }}</td></tr>
+  </table>
+  {% if recent_jobs %}
+  <h2>최근 분석</h2>
+  <ul>{% for j in recent_jobs %}<li>#{{ j.pk }} · {{ j.get_input_type_display }} · {{ j.get_status_display }} · {{ j.created_at|date:"m-d H:i" }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% endblock %}
