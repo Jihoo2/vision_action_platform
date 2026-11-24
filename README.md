@@ -222,7 +222,7 @@ cd backend && celery -A config worker -l info
 
 ```bash
 docker compose exec django python manage.py test analyses accounts
-# Ran 48 tests ... OK  (팀 자세 판정 연결 테스트 10개 포함)
+# Ran 49 tests ... OK  (팀 자세 판정 연결 테스트 11개 포함)
 ```
 
 ---
@@ -300,7 +300,7 @@ docker compose exec django python manage.py test analyses accounts
 | Confidence | 33.3% | 33.3% |
 | AI 처리 시간 | 3.0초 | 3.6초 |
 
-**자동 테스트 48개** (팀 자세 판정 연결 10개 포함) — 정상 흐름뿐 아니라 실패 상황(Redis 끊김, AI 서버 다운, 손상 영상, 카메라 연결 실패, 중복 실행, 다른 사용자 접근)도 가짜(mock)로 만들어 검증합니다.
+**자동 테스트 49개** (팀 자세 판정 연결 11개 포함) — 정상 흐름뿐 아니라 실패 상황(Redis 끊김, AI 서버 다운, 손상 영상, 카메라 연결 실패, 중복 실행, 다른 사용자 접근)도 가짜(mock)로 만들어 검증합니다.
 
 ---
 
