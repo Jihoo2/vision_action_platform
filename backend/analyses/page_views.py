@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from .models import Action
+from .models import Action, AnalysisJob, Exercise
 
 
 def _camera_label(i: int, url: str) -> str:
@@ -23,6 +23,9 @@ def _camera_label(i: int, url: str) -> str:
 def analyses_index(request):
     return render(request, "analyses/index.html", {
         "actions": Action.choices,
+        "exercises": Exercise.choices,
+        "views": AnalysisJob.CameraView.choices,
+        "form_max_seconds": settings.FORM_CAPTURE_MAX_SECONDS,
         "cameras": [(url, _camera_label(i, url)) for i, url in enumerate(settings.ALLOWED_CAMERA_URLS)],
         "capture_seconds": settings.CAMERA_CAPTURE_SECONDS,
         "max_upload_mb": settings.MAX_UPLOAD_MB,
@@ -34,7 +37,7 @@ def analyses_index(request):
 from django.core.exceptions import PermissionDenied  # noqa: E402
 from django.db.models import Avg, Count  # noqa: E402
 
-from .models import AnalysisJob, PersonPrediction  # noqa: E402
+from .models import PersonPrediction, RepJudgment  # noqa: E402
 
 
 @login_required
@@ -62,9 +65,13 @@ def dashboard(request):
                    "values": [by_status.get(k, 0) for k in AnalysisJob.Status.values]},
         "input": {"labels": [input_names[k] for k in AnalysisJob.InputType.values],
                   "values": [by_input.get(k, 0) for k in AnalysisJob.InputType.values]},
+        # 팀 자세 판정: 동작별 OK / NG / CHECK 회차 수
+        "form": _form_chart(),
     }
     summary = {
         "jobs": AnalysisJob.objects.count(),
+        "form_jobs": AnalysisJob.objects.filter(task_type=AnalysisJob.TaskType.FORM).count(),
+        "reps": RepJudgment.objects.count(),
         "predictions": PersonPrediction.objects.count(),
         "users": AnalysisJob.objects.values("user").distinct().count(),
         "uncertain": PersonPrediction.objects.filter(uncertain=True).count(),
@@ -75,3 +82,13 @@ def dashboard(request):
               .annotate(pred_count=Count("predictions")).order_by("-created_at")[:10])
     return render(request, "analyses/dashboard.html",
                   {"chart": chart, "summary": summary, "recent": recent})
+
+
+def _form_chart() -> dict:
+    """동작(버피·런지·스쿼트 점프)별 OK/NG/CHECK 회차 수 — RepJudgment ORM 집계"""
+    rows = RepJudgment.objects.values_list("job__exercise", "verdict").annotate(n=Count("id"))
+    table = {(ex, v): n for ex, v, n in rows}
+    verdicts = RepJudgment.Verdict.values
+    return {"labels": [label for _, label in Exercise.choices],
+            "datasets": [{"label": v, "values": [table.get((ex, v), 0) for ex, _ in Exercise.choices]}
+                         for v in verdicts]}

@@ -21,6 +21,14 @@
     options: { plugins: { legend: { position: "right" } } },
   });
 
+  const formColors = { OK: "#16a34a", NG: "#dc2626", CHECK: "#f59e0b" };
+  new Chart(document.getElementById("chart-form"), {
+    type: "bar",
+    data: { labels: data.form.labels,
+            datasets: data.form.datasets.map((d) => ({ label: d.label, data: d.values, backgroundColor: formColors[d.label] })) },
+    options: { plugins: { legend: { position: "right" } }, scales: { x: { stacked: true }, y: { ...intAxis, stacked: true } } },
+  });
+
   new Chart(document.getElementById("chart-input"), {
     type: "bar",
     data: { labels: data.input.labels, datasets: [{ label: "작업 수", data: data.input.values, backgroundColor: ["#2f5bea", "#f59e0b"] }] },

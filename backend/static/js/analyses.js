@@ -5,6 +5,9 @@
   const ACTION_LABELS = Object.fromEntries(JSON.parse(document.getElementById("action-labels").textContent));
   const STATUS_KO = { PENDING: "대기", PROCESSING: "처리 중", COMPLETED: "완료", FAILED: "실패" };
   const INPUT_KO = { UPLOAD: "영상 업로드", IPCAM: "IP Webcam" };
+  const EXERCISE_LABELS = Object.fromEntries(JSON.parse(document.getElementById("exercise-labels").textContent));
+  const VIEW_KO = { auto: "자동", front: "정면", diag: "사선", side: "측면" };
+  const VERDICT_BADGE = { OK: "ok", NG: "err", CHECK: "warn" };
 
   const $ = (sel) => document.querySelector(sel);
   const form = $("#analyze-form"), startBtn = $("#start-btn");
@@ -36,10 +39,27 @@
     return `요청 실패 (HTTP ${err.status || "?"})`;
   }
 
+  // ---------- ① 분석 종류 (동작 인식 / 팀 자세 판정) ----------
+  document.querySelectorAll(".tab[data-task]").forEach((tab) => tab.addEventListener("click", () => {
+    const task = tab.dataset.task;
+    document.querySelectorAll(".tab[data-task]").forEach((t) => t.classList.toggle("active", t === tab));
+    $("#task_type").value = task;
+    document.querySelectorAll(".form-only").forEach((el) => { el.hidden = task !== "FORM"; });
+    document.querySelectorAll(".action-only").forEach((el) => { el.hidden = task === "FORM"; });
+    const cap = $("#capture_seconds");
+    if (cap) {
+      const max = task === "FORM" ? cap.dataset.maxForm : cap.dataset.maxAction;
+      cap.max = max; $("#cap-max").textContent = max;
+      if (task === "FORM" && Number(cap.value) < 15) cap.value = 15;     // 여러 회차를 보도록 기본 15초
+      if (task !== "FORM" && Number(cap.value) > Number(max)) cap.value = max;
+    }
+    $("#start-btn").textContent = task === "FORM" ? "자세 판정 시작" : "AI 분석 시작";
+  }));
+
   // ---------- ① 입력 방식 탭 ----------
-  document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
+  document.querySelectorAll(".tab[data-tab]").forEach((tab) => tab.addEventListener("click", () => {
     const kind = tab.dataset.tab;
-    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
+    document.querySelectorAll(".tab[data-tab]").forEach((t) => t.classList.toggle("active", t === tab));
     document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.dataset.pane === kind));
     $("#input_type").value = kind;
     $("#step-processing").textContent = kind === "IPCAM" ? "영상 수집·AI 분석" : "처리 중";
@@ -49,9 +69,15 @@
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const kind = $("#input_type").value;
+    const task = $("#task_type").value;
     const fd = new FormData();
     fd.append("input_type", kind);
+    fd.append("task_type", task);
     ["expected_action", "title"].forEach((k) => fd.append(k, form.elements[k].value));
+    if (task === "FORM") {
+      fd.append("exercise", form.elements.exercise.value);
+      fd.append("camera_view", form.elements.camera_view.value);
+    }
     if (kind === "UPLOAD") {
       const file = $("#video").files[0];
       if (!file) return showMessage("영상 파일을 선택하세요.", true);
@@ -67,12 +93,12 @@
       const job = await api(API, { method: "POST", body: fd });       // 서버는 분석을 기다리지 않고 즉시 응답
       showJob(job);
       startPolling(job.id);
-      form.reset(); $("#input_type").value = kind;
+      $("#video").value = ""; $("#title").value = "";        // 분석 종류·동작 선택은 그대로 둠
     } catch (err) {
       showMessage(errText(err), true);
     } finally {
       startBtn.disabled = false;
-      startBtn.textContent = "AI 분석 시작";
+      startBtn.textContent = $("#task_type").value === "FORM" ? "자세 판정 시작" : "AI 분석 시작";
     }
   });
 
@@ -98,7 +124,8 @@
   }
   const processingText = () => ($("#input_type").value === "IPCAM"
     ? "카메라에서 영상을 수집한 뒤 AI가 분석하고 있습니다. 카메라 앞에서 동작을 수행하세요."
-    : "AI가 영상을 분석하고 있습니다…");
+    : ($("#task_type").value === "FORM" ? "팀 모델이 회차마다 자세를 판정하고 있습니다… (영상 길이에 따라 수십 초)"
+                                        : "AI가 영상을 분석하고 있습니다…"));
 
   function setSteps(status) {
     const order = ["PENDING", "PROCESSING", "COMPLETED"];
@@ -121,7 +148,8 @@
   // ---------- ③ 결과 표시 ----------
   function showJob(job) {
     currentId = job.id;
-    $("#job-label").textContent = `#${job.id} · ${INPUT_KO[job.input_type] || job.input_type}`;
+    const what = job.task_type === "FORM" ? `자세 판정 · ${EXERCISE_LABELS[job.exercise] || job.exercise}` : "동작 인식";
+    $("#job-label").textContent = `#${job.id} · ${what} · ${INPUT_KO[job.input_type] || job.input_type}`;
     setSteps(job.status);
     const body = $("#result-body");
     if (job.status === "FAILED") {
@@ -135,6 +163,7 @@
       return;
     }
     showMessage(job.result_message || `분석 완료 · 영상 ${sec(job.video_duration_sec)} · AI 처리 ${sec(job.processing_time_sec)}`);
+    if (job.task_type === "FORM") { body.innerHTML = formResult(job); return; }
     const preds = job.predictions || [];
     const skipped = (job.extra && job.extra.skipped_tracks) || [];
     const rows = preds.map((p) => `
@@ -158,22 +187,63 @@
       ${job.video ? `<video class="preview" src="${esc(job.video)}" controls muted></video>` : ""}`;
   }
 
+  // ---------- ③-2 팀 자세 판정 결과 (회차별 OK / NG / CHECK) ----------
+  const num = (v, d = 2) => (v == null ? "-" : Number(v).toFixed(d));
+  function checksText(checks) {
+    return (checks || []).map((c) => {
+      const range = `${c.lo == null ? "" : num(c.lo)}~${c.hi == null ? "" : num(c.hi)}`;
+      return `<span class="${c.ok ? "muted" : "bad"}">${esc(c.metric)} ${num(c.value)} <small>[${range}]</small></span>`;
+    }).join("<br>");
+  }
+  function formResult(job) {
+    const s = (job.extra && job.extra.summary) || {};
+    const meta = (job.extra && job.extra.meta) || {};
+    const reps = job.reps || [];
+    const rows = reps.map((r) => `
+      <tr>
+        <td>${esc(r.rep_label)}</td>
+        <td><span class="badge ${VERDICT_BADGE[r.verdict] || ""}">${esc(r.verdict)}</span>
+            ${r.model_flag ? '<span class="badge warn" title="이상 탐지 모델 보조 표시 (판정에는 반영 안 함)">주의</span>' : ""}</td>
+        <td class="muted">${num(r.start_sec, 1)}–${num(r.end_sec, 1)}초</td>
+        <td>${esc(r.message)}${r.boundary ? `<br><small class="muted">경계: ${esc(r.boundary)}</small>` : ""}</td>
+        <td><small>${checksText(r.extra && r.extra.checks)}</small></td>
+      </tr>`).join("");
+    return `
+      <div class="summary-row">
+        <span class="badge ok">OK ${s.ok ?? 0}</span><span class="badge err">NG ${s.ng ?? 0}</span>
+        <span class="badge warn">CHECK ${s.check ?? 0}</span>
+        <span class="muted">${s.reps ?? 0}회 · 각도 ${esc(VIEW_KO[meta.view] || meta.view || "-")}${meta.view_requested === "auto" ? " (자동 추정)" : ""}</span>
+      </div>
+      ${reps.length ? `
+      <table class="data">
+        <thead><tr><th>회차</th><th>판정</th><th>구간</th><th>교정 메시지</th><th>측정값 [기준]</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : '<p class="empty">판정한 회차가 없습니다.</p>'}
+      <p class="hint">팀 모델: 정석 자세(VICON GLB) 범위를 벗어나면 NG · 관절이 잘 안 보이면 CHECK · '주의'는 이상 탐지 모델의 보조 표시로 판정에 반영하지 않습니다.</p>
+      ${job.video ? `<video class="preview" src="${esc(job.video)}" controls muted></video>` : ""}`;
+  }
+
   // ---------- 최근 이력 ----------
   async function loadHistory() {
     const tbody = $("#history");
     try {
       const data = await api(`${API}?page=1`);
       const jobs = data.results || data;
-      if (!jobs.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">아직 분석 기록이 없습니다.</td></tr>'; return; }
+      if (!jobs.length) { tbody.innerHTML = '<tr><td colspan="10" class="empty">아직 분석 기록이 없습니다.</td></tr>'; return; }
       tbody.innerHTML = jobs.slice(0, 10).map((j) => {
         const top = (j.predictions || []).slice().sort((a, b) => b.confidence - a.confidence)[0];
         const badge = { COMPLETED: "ok", FAILED: "err", PROCESSING: "run", PENDING: "" }[j.status];
+        const isForm = j.task_type === "FORM";
+        const fs = (j.extra && j.extra.summary) || {};
+        const resultCell = isForm
+          ? (j.status === "COMPLETED" ? `${fs.reps ?? 0}회 · OK ${fs.ok ?? 0} / NG ${fs.ng ?? 0} / CHECK ${fs.check ?? 0}` : "-")
+          : (top ? `${esc(actionName(top.action_label))} (${j.prediction_count}명)` : "-");
         return `<tr class="clickable ${j.id === currentId ? "sel" : ""}" data-id="${j.id}">
-          <td>${j.id}</td><td>${INPUT_KO[j.input_type] || j.input_type}</td>
+          <td>${j.id}</td><td>${isForm ? "자세 판정" : "동작 인식"}</td><td>${INPUT_KO[j.input_type] || j.input_type}</td>
           <td><span class="badge ${badge}">${STATUS_KO[j.status] || j.status}</span></td>
-          <td>${esc(actionName(j.expected_action))}</td>
-          <td>${top ? `${esc(actionName(top.action_label))} (${j.prediction_count}명)` : "-"}</td>
-          <td>${top ? pct(top.confidence) : "-"}</td>
+          <td>${esc(isForm ? (EXERCISE_LABELS[j.exercise] || j.exercise) : actionName(j.expected_action))}</td>
+          <td>${resultCell}</td>
+          <td>${!isForm && top ? pct(top.confidence) : "-"}</td>
           <td>${sec(j.video_duration_sec)}</td><td>${sec(j.processing_time_sec)}</td>
           <td class="muted">${time(j.created_at)}</td></tr>`;
       }).join("");
@@ -184,7 +254,7 @@
         tbody.querySelectorAll("tr").forEach((r) => r.classList.toggle("sel", r === tr));
       }));
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="9" class="msg error">${esc(errText(err))}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" class="msg error">${esc(errText(err))}</td></tr>`;
     }
   }
 

@@ -222,7 +222,7 @@ cd backend && celery -A config worker -l info
 
 ```bash
 docker compose exec django python manage.py test analyses accounts
-# Ran 38 tests ... OK
+# Ran 48 tests ... OK  (팀 자세 판정 연결 테스트 10개 포함)
 ```
 
 ---
@@ -300,7 +300,7 @@ docker compose exec django python manage.py test analyses accounts
 | Confidence | 33.3% | 33.3% |
 | AI 처리 시간 | 3.0초 | 3.6초 |
 
-**자동 테스트 38개** — 정상 흐름뿐 아니라 실패 상황(Redis 끊김, AI 서버 다운, 손상 영상, 카메라 연결 실패, 중복 실행, 다른 사용자 접근)도 가짜(mock)로 만들어 검증합니다.
+**자동 테스트 48개** (팀 자세 판정 연결 10개 포함) — 정상 흐름뿐 아니라 실패 상황(Redis 끊김, AI 서버 다운, 손상 영상, 카메라 연결 실패, 중복 실행, 다른 사용자 접근)도 가짜(mock)로 만들어 검증합니다.
 
 ---
 
@@ -316,10 +316,45 @@ docker compose exec django python manage.py test analyses accounts
 
 ---
 
-## 9. 한계와 다음 단계
+## 9. 팀 모델 연결: 맨몸운동 자세 판정
+
+강사님 안내대로 수업 모델로 서비스를 먼저 완성한 뒤, **팀 프로젝트(G5_skeleton/subject10_team_pilot) 판정 엔진**을 붙였습니다.
+Django·Celery·DB·화면 흐름은 그대로이고, **AI 서버만 하나 추가**했습니다.
+
+```mermaid
+flowchart LR
+    C["celery<br/>tasks.py"] -- "task_type=ACTION" --> F["fastapi :8001<br/>6개 동작 인식 (RF)"]
+    C -- "task_type=FORM" --> J["formjudge :8002<br/>팀 자세 판정"]
+    J -. "읽기 전용 볼륨" .-> T[("G5_skeleton<br/>subject10_team_pilot<br/>src · configs · reports")]
+```
+
+| 구분 | 동작 인식 (수업 모델) | 자세 판정 (팀 모델) |
+|---|---|---|
+| 질문 | 어떤 동작인가? (6개 중 하나) | 그 동작을 바르게 했나? (회차마다) |
+| AI 서버 | `ai_service` (YOLO Pose + ByteTrack + RF) | `form_service` (YOLO Pose + 팀 `OnlineJudge`) |
+| 결과 저장 | `PersonPrediction` (사람별) | `RepJudgment` (회차별 OK / NG / CHECK + 교정 메시지) |
+| 대상 | A001~A006 | 버피 A001 · 런지 A004 · 스쿼트 점프 A008 |
+
+- **팀 코드는 복사하지 않습니다.** `formjudge` 컨테이너가 팀 프로젝트를 `/team`(읽기 전용)으로 연결해, 팀 웹·실시간·터미널 판정과 **같은 엔진**(`src/realtime_judge.py`)과 **같은 판정 기준**(`reports/team_projects/team05/standards`)을 씁니다.
+- `AnalysisJob.task_type`(ACTION / FORM), `exercise`, `camera_view` 를 추가했고(마이그레이션 0003), 모델 이름은 `model_name = team05_form_rules` 로 남습니다.
+- 팀 기준 파일이 없는 각도는 CHECK 로만 나오고, `GET :8002/health` 의 `artifacts` 에서 동작·각도별 기준 파일 유무를 확인할 수 있습니다.
+- `formjudge` 가 준비되지 않아도 동작 인식은 그대로 동작합니다 (`depends_on: service_started`).
+
+**실행**
+
+```bash
+# 팀 프로젝트가 ~/ai_vision/G5_skeleton/subject10_team_pilot 에 있고 판정 기준(reports)이 만들어져 있어야 함
+docker compose up -d --build formjudge celery django
+curl -s localhost:8002/health | python3 -m json.tool
+docker compose exec django python manage.py migrate
+```
+
+다른 위치라면 `.env` 에 `TEAM_PROJECT_DIR=/절대/경로/subject10_team_pilot` 를 넣습니다.
+
+## 10. 한계와 다음 단계
 
 - **Confidence가 낮음 (20~35%)**: 6개 동작 중 상대 점수이며, 학습 데이터가 적은 RF 기준 모델의 한계입니다. 학습하지 않은 동작도 6개 중 하나로 나옵니다.
-- **모델 교체 계획**: 팀 프로젝트(맨몸운동 동작 판정) 모델이 완성되면 `ai_service` 만 교체합니다. Django·Celery·DB는 그대로이며, 모델별 결과 차이는 `model_name`, `extra` 필드에 저장해 비교합니다.
+- **팀 모델 연결 (9절)**: 수업 모델(6개 동작 인식)은 그대로 두고, 팀 자세 판정 엔진을 두 번째 AI 서버로 붙였습니다. 팀 판정 기준을 `rules-v1`로 동결하고 test_ext 평가를 마치면 최종 성능을 추가합니다.
 - CPU 컨테이너는 Frame이 많은 영상(471 Frame)에서 처리 시간이 늘어납니다 → GPU 컨테이너(NVIDIA Container Toolkit) 적용 여지.
 
 ---
@@ -330,6 +365,7 @@ docker compose exec django python manage.py test analyses accounts
 vision_action_platform/
 ├── compose.yaml
 ├── .env.example
+├── form_service/            # 팀 자세 판정 AI 서버 (G5_skeleton 엔진 연결)
 ├── ai_service/              # FastAPI 추론 서버
 │   ├── main.py              # /health, lifespan 에서 모델 1회 로드
 │   ├── routers/predictions.py

@@ -7,6 +7,7 @@
   <div class="row">
     <div><div class="muted">전체 분석 작업</div><div style="font-size:26px;font-weight:700">{{ summary.jobs }}</div></div>
     <div><div class="muted">사람별 예측</div><div style="font-size:26px;font-weight:700">{{ summary.predictions }}</div></div>
+    <div><div class="muted">자세 판정 작업 · 회차</div><div style="font-size:26px;font-weight:700">{{ summary.form_jobs }} · {{ summary.reps }}</div></div>
     <div><div class="muted">판단 불확실</div><div style="font-size:26px;font-weight:700">{{ summary.uncertain }}</div></div>
     <div><div class="muted">요청 사용자</div><div style="font-size:26px;font-weight:700">{{ summary.users }}</div></div>
     <div><div class="muted">평균 AI 처리 시간</div><div style="font-size:26px;font-weight:700">{% if summary.avg_processing %}{{ summary.avg_processing|floatformat:1 }}초{% else %}-{% endif %}</div></div>
@@ -18,19 +19,21 @@
   <section class="card"><h2 style="margin-top:0">① 동작별 예측 건수</h2><canvas id="chart-actions" height="220"></canvas></section>
   <section class="card"><h2 style="margin-top:0">② 작업 상태별 건수</h2><canvas id="chart-status" height="220"></canvas></section>
 </div>
+<section class="card"><h2 style="margin-top:0">③ 자세 판정 결과 (팀 모델 · 동작별 회차)</h2><canvas id="chart-form" height="120"></canvas>
+  <p class="hint">OK·NG는 팀 규칙 판정, CHECK는 관절이 잘 안 보이거나 그 각도의 판정 기준이 없는 회차입니다.</p></section>
 <div class="grid2">
   <section class="card"><h2 style="margin-top:0">입력 방식별 건수 (선택)</h2><canvas id="chart-input" height="180"></canvas></section>
   <section class="card">
     <h2 style="margin-top:0">최근 작업</h2>
     <table class="data">
-      <thead><tr><th>#</th><th>사용자</th><th>입력</th><th>상태</th><th>예측 수</th><th>요청 시각</th></tr></thead>
+      <thead><tr><th>#</th><th>사용자</th><th>분석</th><th>입력</th><th>상태</th><th>예측 수</th><th>요청 시각</th></tr></thead>
       <tbody>
       {% for j in recent %}
         <tr><td><a href="{% url 'admin:analyses_analysisjob_change' j.pk %}">{{ j.pk }}</a></td>
-          <td>{{ j.user.username }}</td><td>{{ j.get_input_type_display }}</td>
+          <td>{{ j.user.username }}</td><td>{% if j.task_type == "FORM" %}자세 판정 · {{ j.get_exercise_display }}{% else %}동작 인식{% endif %}</td><td>{{ j.get_input_type_display }}</td>
           <td>{{ j.get_status_display }}</td><td>{{ j.pred_count }}</td>
           <td class="muted">{{ j.created_at|date:"m-d H:i:s" }}</td></tr>
-      {% empty %}<tr><td colspan="6" class="empty">작업이 없습니다.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="7" class="empty">작업이 없습니다.</td></tr>{% endfor %}
       </tbody>
     </table>
     <p class="hint"><a href="{% url 'admin:analyses_analysisjob_changelist' %}">Django Admin에서 전체 작업 관리 →</a></p>

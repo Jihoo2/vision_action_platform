@@ -10,8 +10,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from .camera_capture import CameraError, capture_clip
-from .models import AnalysisJob, PersonPrediction
-from .services import AIInputError, AIServiceError, predict_video
+from .models import AnalysisJob, PersonPrediction, RepJudgment
+from .services import AIInputError, AIServiceError, judge_form, predict_video
 
 log = logging.getLogger(__name__)
 PRED_FIELDS = ["track_id", "action_label", "confidence", "second_label", "second_confidence",
@@ -43,12 +43,18 @@ def run_analysis(self, job_id: int):
     log.info("Job %s 처리 시작 (%s)", job_id, job.input_type)
     try:
         video_path = _acquire_video(job)
-        result = predict_video(video_path)
+        if job.task_type == AnalysisJob.TaskType.FORM:      # 팀 자세 판정 (form_service)
+            result = judge_form(video_path, job.exercise, job.camera_view)
+        else:                                               # 6개 동작 인식 (ai_service)
+            result = predict_video(video_path)
     except (CameraError, AIInputError, AIServiceError) as e:
         return _fail(job, str(e))
     except Exception as e:  # noqa: BLE001  예상 못 한 오류도 FAILED 로 남김
         log.exception("Job %s 예외", job_id)
         return _fail(job, f"처리 중 오류: {e.__class__.__name__}: {e}")
+
+    if job.task_type == AnalysisJob.TaskType.FORM:
+        return _save_form(job, result)
 
     with transaction.atomic():
         job.predictions.all().delete()
@@ -71,6 +77,38 @@ def run_analysis(self, job_id: int):
         job.save()
     log.info("Job %s 완료: 예측 %d건", job_id, job.predictions.count())
     return {"job_id": job_id, "status": job.status, "predictions": job.predictions.count()}
+
+
+def _save_form(job: AnalysisJob, result: dict):
+    """팀 판정 결과 → 회차별 RepJudgment + 작업 요약 (같은 트랜잭션)"""
+    meta, summary = result.get("meta") or {}, result.get("summary") or {}
+    with transaction.atomic():
+        job.reps.all().delete()
+        RepJudgment.objects.bulk_create([
+            RepJudgment(
+                job=job, seq=i, rep_label=str(e.get("rep", i))[:12], kind=e.get("kind") or "rep",
+                verdict=e.get("verdict") or "CHECK",
+                start_sec=e.get("start_s"), end_sec=e.get("end_s"),
+                message=(e.get("message") or "")[:255],
+                out_of_range=(e.get("out_of_range") or "")[:255],
+                boundary=(e.get("boundary") or "")[:255],
+                model_flag=bool(e.get("model_flag")), model_score=e.get("model_score"),
+                extra={k: e.get(k) for k in ("checks", "values", "view", "depth", "knee_min",
+                                             "start_frame", "end_frame") if e.get(k) is not None})
+            for i, e in enumerate(result.get("reps", []), start=1)
+        ])
+        job.model_name = (result.get("model") or {}).get("name", "")[:50]
+        job.extra = {"meta": meta, "summary": summary, "model": result.get("model")}
+        job.status = AnalysisJob.Status.COMPLETED
+        job.result_message = (result.get("message") or "")[:255]
+        job.error_message = ""
+        job.video_duration_sec = meta.get("duration_sec")
+        job.processing_time_sec = result.get("processing_time_sec")
+        job.finished_at = timezone.now()
+        job.save()
+    n = job.reps.count()
+    log.info("Job %s 자세 판정 완료: %d건 %s", job.pk, n, summary)
+    return {"job_id": job.pk, "status": job.status, "reps": n}
 
 
 def _fail(job: AnalysisJob, message: str):

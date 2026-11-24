@@ -128,3 +128,8 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1     # 영상 분석은 무거우므로 한
 # FastAPI AI 추론 서버 (Docker에서는 http://fastapi:8001 — 서비스 이름 사용)
 FASTAPI_URL = os.getenv("FASTAPI_URL", "http://localhost:8001")
 FASTAPI_TIMEOUT_SEC = float(os.getenv("FASTAPI_TIMEOUT_SEC", "180"))
+
+# 팀 자세 판정 AI 서버 (form_service) — 영상 전체를 Frame마다 판정하므로 시간 여유를 더 둠
+FORM_SERVICE_URL = os.getenv("FORM_SERVICE_URL", "http://localhost:8002")
+FORM_TIMEOUT_SEC = float(os.getenv("FORM_TIMEOUT_SEC", "600"))
+FORM_CAPTURE_MAX_SECONDS = int(os.getenv("FORM_CAPTURE_MAX_SECONDS", "30"))

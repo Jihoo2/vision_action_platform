@@ -1,6 +1,7 @@
 # Vision Action Platform — 5개 서비스
 #   django   : 회원·DRF API·화면·Admin·ORM        (브라우저 공개 8000)
 #   fastapi  : YOLO Pose + Random Forest 추론     (개발 확인용 8001, /docs)
+#   formjudge: 팀 자세 판정 (G5_skeleton 판정 엔진) (개발 확인용 8002, /docs)
 #   celery   : 작업 처리 → FastAPI 호출 → ORM 저장
 #   redis    : Celery 작업 대기열
 #   postgres : 영구 DB
@@ -11,6 +12,7 @@ x-backend-env: &backend-env
   POSTGRES_PORT: "5432"
   REDIS_URL: redis://redis:6379/0
   FASTAPI_URL: http://fastapi:8001
+  FORM_SERVICE_URL: http://formjudge:8002
   DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,django
 
 services:
@@ -49,6 +51,22 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  formjudge:
+    build: ./form_service
+    volumes:
+      # 팀 프로젝트(코드·configs·reports 판정 기준)를 읽기 전용으로 연결 — 팀 코드는 복사하지 않음
+      - ${TEAM_PROJECT_DIR:-../G5_skeleton/subject10_team_pilot}:/team:ro
+      - ./ai_service/models:/app/models:ro      # yolo11n-pose.pt 공유
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if b'\"ok\"' in urllib.request.urlopen('http://localhost:8002/health').read() else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
   django:
     build: ./backend
     env_file: .env
@@ -76,6 +94,7 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       fastapi: { condition: service_healthy }
+      formjudge: { condition: service_started }   # 팀 기준 파일이 없어도 동작 인식은 계속 동작
     restart: unless-stopped
 
 volumes:

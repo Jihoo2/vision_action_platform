@@ -30,7 +30,7 @@ class AnalysisJobViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]   # PUT 전체 수정 금지
 
     def get_queryset(self):
-        qs = AnalysisJob.objects.select_related("user").prefetch_related("predictions")
+        qs = AnalysisJob.objects.select_related("user").prefetch_related("predictions", "reps")
         user = self.request.user
         return qs if user.is_staff else qs.filter(user=user)
 
@@ -60,7 +60,7 @@ class AnalysisJobViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if instance.video:
             instance.video.delete(save=False)                # media/ 의 실제 파일도 정리
-        instance.delete()                                    # PersonPrediction 은 CASCADE
+        instance.delete()                                    # PersonPrediction·RepJudgment 는 CASCADE
 
     @action(detail=True, methods=["get"])
     def status(self, request, pk=None):
@@ -71,6 +71,7 @@ class AnalysisJobViewSet(viewsets.ModelViewSet):
             "status_display": job.get_status_display(),
             "done": job.status in (AnalysisJob.Status.COMPLETED, AnalysisJob.Status.FAILED),
             "prediction_count": job.predictions.count(),
+            "rep_count": job.reps.count(),
             "result_message": job.result_message,
             "error_message": job.error_message,
         })

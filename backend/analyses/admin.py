@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.db.models import Count
 
-from .models import AnalysisJob, PersonPrediction
+from .models import AnalysisJob, PersonPrediction, RepJudgment
 
 
 class PersonPredictionInline(admin.TabularInline):
@@ -13,11 +13,19 @@ class PersonPredictionInline(admin.TabularInline):
     can_delete = False
 
 
+class RepJudgmentInline(admin.TabularInline):
+    model = RepJudgment
+    extra = 0
+    fields = ["rep_label", "verdict", "start_sec", "end_sec", "message", "out_of_range", "model_flag"]
+    readonly_fields = fields
+    can_delete = False
+
+
 @admin.register(AnalysisJob)
 class AnalysisJobAdmin(admin.ModelAdmin):
-    list_display = ["id", "user", "input_type", "status", "prediction_count",
+    list_display = ["id", "user", "task_type", "exercise", "input_type", "status", "prediction_count",
                     "expected_action", "video_duration_sec", "created_at", "finished_at"]
-    list_filter = ["status", "input_type", "created_at"]
+    list_filter = ["task_type", "status", "input_type", "exercise", "created_at"]
     search_fields = ["user__username", "title", "memo"]
     list_select_related = ["user"]
     date_hierarchy = "created_at"
@@ -25,14 +33,14 @@ class AnalysisJobAdmin(admin.ModelAdmin):
                        "video_duration_sec", "processing_time_sec",
                        "created_at", "started_at", "finished_at"]
     fieldsets = [
-        ("요청", {"fields": ["user", "title", "memo", "input_type", "video",
+        ("요청", {"fields": ["user", "title", "memo", "task_type", "exercise", "camera_view", "input_type", "video",
                             "camera_url", "capture_seconds", "expected_action"]}),
-        ("처리 상태", {"fields": ["status", "celery_task_id", "result_message", "error_message"]}),
+        ("처리 상태", {"fields": ["status", "celery_task_id", "model_name", "result_message", "error_message"]}),
         ("시간", {"fields": ["video_duration_sec", "processing_time_sec",
                             "created_at", "started_at", "finished_at"],
                  "classes": ["collapse"]}),
     ]
-    inlines = [PersonPredictionInline]
+    inlines = [PersonPredictionInline, RepJudgmentInline]
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_pred_count=Count("predictions"))
@@ -48,4 +56,12 @@ class PersonPredictionAdmin(admin.ModelAdmin):
                     "margin", "uncertain", "predicted_at"]
     list_filter = ["action_label", "uncertain", "job__input_type"]
     search_fields = ["job__user__username", "action_label"]
+    list_select_related = ["job", "job__user"]
+
+
+@admin.register(RepJudgment)
+class RepJudgmentAdmin(admin.ModelAdmin):
+    list_display = ["id", "job", "rep_label", "verdict", "start_sec", "end_sec", "message", "model_flag"]
+    list_filter = ["verdict", "model_flag", "job__exercise"]
+    search_fields = ["job__user__username", "message"]
     list_select_related = ["job", "job__user"]
