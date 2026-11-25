@@ -34,9 +34,9 @@ class AnalysisJobViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]   # PUT 전체 수정 금지
 
     def get_queryset(self):
-        qs = AnalysisJob.objects.select_related("user").prefetch_related("predictions", "reps")
-        user = self.request.user
-        return qs if user.is_staff else qs.filter(user=user)
+        qs = AnalysisJob.objects.select_related("user")
+        qs = qs.prefetch_related("predictions", "reps") if self.action in ("list", "retrieve") else qs   # 결과 표가 필요한 API만
+        return qs if self.request.user.is_staff else qs.filter(user=self.request.user)
 
     def get_serializer_class(self):
         if self.action == "create":
